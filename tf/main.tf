@@ -1,12 +1,4 @@
 # main.tf
-provider "aws" {
-  region = "us-east-1"
-}
-
-# Get current region data
-data "aws_caller_identity" "current" {}
-
-data "aws_region" "current" {}
 
 # Variables
 variable "github_org" {
@@ -16,12 +8,6 @@ variable "github_org" {
 
 variable "github_repo" {
   description = "GitHub repository name"
-  type        = string
-}
-
-
-variable "aws_region" {
-  description = "aws_region name"
   type        = string
 }
 
@@ -36,6 +22,35 @@ variable "environment" {
   description = "Environment (dev/staging/prod)"
   type        = string
   default     = "dev"
+}
+
+variable "allowed_account_ids" {
+  description = "List of allowed AWS account IDs"
+  type        = list(string)
+}
+
+# Provider configuration with security controls
+provider "aws" {
+  region              = "us-east-1"
+  allowed_account_ids = var.allowed_account_ids
+
+  default_tags {
+    tags = local.common_tags
+  }
+}
+
+# Data sources
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+# Common tags
+locals {
+  common_tags = {
+    Project     = var.project_name
+    Environment = var.environment
+    ManagedBy   = "terraform"
+    GitRepo     = "${var.github_org}/${var.github_repo}"
+  }
 }
 
 # VPC and Network Configuration
@@ -158,24 +173,21 @@ resource "aws_ecs_service" "main" {
   }
 }
 
-# GitHub Actions OIDC Provider
-data "aws_iam_openid_connect_provider" "github_actions" {
-  url = "https://token.actions.githubusercontent.com"
-}
-
 # GitHub Actions Role
 resource "aws_iam_role" "github_actions" {
-  name = "${var.project_name}-github-actions-role"
+  name = "${var.project_name}-github-actions-role-${var.environment}"
+  path = "/github-actions/"
 
+  # Force MFA
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Action = "sts:AssumeRoleWithWebIdentity"
         Effect = "Allow"
         Principal = {
-          Federated = data.aws_iam_openid_connect_provider.github_actions.arn
+          Federated = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/token.actions.githubusercontent.com"
         }
+        Action = "sts:AssumeRoleWithWebIdentity"
         Condition = {
           StringEquals = {
             "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
@@ -187,21 +199,55 @@ resource "aws_iam_role" "github_actions" {
       }
     ]
   })
-  tags = {
-    Project     = var.project_name
-    Environment = var.environment
-  }
+
+  # Permission boundary
+  permissions_boundary = aws_iam_policy.permission_boundary.arn
+
+  tags = merge(local.common_tags, {
+    Role = "GitHubActions"
+  })
 }
 
-# ECR Access Policy
+# Permission Boundary
+resource "aws_iam_policy" "permission_boundary" {
+  name = "${var.project_name}-permission-boundary-${var.environment}"
+  path = "/github-actions/"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:*",
+          "ecs:*",
+          "securityhub:*"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Deny"
+        Action = [
+          "iam:*",
+          "organizations:*",
+          "account:*"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+# ECR Access - Granular permissions
 resource "aws_iam_role_policy" "ecr_access" {
-  name = "${var.project_name}-ecr-access"
+  name = "${var.project_name}-ecr-access-${var.environment}"
   role = aws_iam_role.github_actions.id
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
+        Sid    = "ECRTokenGeneration"
         Effect = "Allow"
         Action = [
           "ecr:GetAuthorizationToken"
@@ -209,15 +255,28 @@ resource "aws_iam_role_policy" "ecr_access" {
         Resource = "*"
       },
       {
+        Sid    = "ECRImagePush"
         Effect = "Allow"
         Action = [
           "ecr:BatchCheckLayerAvailability",
-          "ecr:GetDownloadUrlForLayer",
-          "ecr:BatchGetImage",
           "ecr:InitiateLayerUpload",
           "ecr:UploadLayerPart",
           "ecr:CompleteLayerUpload",
           "ecr:PutImage"
+        ]
+        Resource = aws_ecr_repository.demo_app.arn
+        Condition = {
+          StringEquals = {
+            "aws:ResourceTag/Environment" = var.environment
+          }
+        }
+      },
+      {
+        Sid    = "ECRImagePull"
+        Effect = "Allow"
+        Action = [
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage"
         ]
         Resource = aws_ecr_repository.demo_app.arn
       }
@@ -225,60 +284,64 @@ resource "aws_iam_role_policy" "ecr_access" {
   })
 }
 
-# ECS Access Policy
+# ECS Access - Granular permissions
 resource "aws_iam_role_policy" "ecs_access" {
-  name = "${var.project_name}-ecs-access"
+  name = "${var.project_name}-ecs-access-${var.environment}"
   role = aws_iam_role.github_actions.id
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
+        Sid    = "ECSServiceUpdate"
         Effect = "Allow"
         Action = [
           "ecs:UpdateService"
         ]
         Resource = aws_ecs_service.main.id
+        Condition = {
+          StringEquals = {
+            "ecs:cluster" = aws_ecs_cluster.main.arn
+          }
+        }
       }
     ]
   })
 }
 
-# Security Hub Access Policy
+# Security Hub Access - Granular permissions
 resource "aws_iam_role_policy" "security_hub_access" {
-  name = "${var.project_name}-security-hub-access"
+  name = "${var.project_name}-security-hub-access-${var.environment}"
   role = aws_iam_role.github_actions.id
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
+        Sid    = "SecurityHubFindings"
         Effect = "Allow"
         Action = [
           "securityhub:BatchImportFindings",
           "securityhub:GetFindings"
         ]
         Resource = [
-          # Hub ARN
           "arn:aws:securityhub:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:hub/default",
-          # Security findings
           "arn:aws:securityhub:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:finding/*",
-          # Aqua Security integration
           "arn:aws:securityhub:${data.aws_region.current.name}::product/aquasecurity/aquasecurity",
           "arn:aws:securityhub:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:security-product/aquasecurity/aquasecurity"
         ]
+      },
+      {
+        Sid    = "SecurityHubRead"
+        Effect = "Allow"
+        Action = [
+          "securityhub:GetInsights",
+          "securityhub:GetInsightResults"
+        ]
+        Resource = "arn:aws:securityhub:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:hub/default"
       }
     ]
   })
-}
-
-# Add tags to all policies
-locals {
-  common_tags = {
-    Project     = var.project_name
-    Environment = var.environment
-    ManagedBy   = "terraform"
-  }
 }
 
 # Make sure Security Hub is enabled
