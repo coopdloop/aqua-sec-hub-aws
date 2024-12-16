@@ -24,33 +24,27 @@ send_to_security_hub() {
     local file=$1
     local temp_file="temp_findings.json"
 
-    # Extract the Findings array and format each finding correctly
-    jq -c '.Findings[] | {
-        SchemaVersion,
-        Id,
-        ProductArn,
-        GeneratorId,
-        AwsAccountId,
-        Types,
-        CreatedAt,
-        UpdatedAt,
-        Severity,
-        Title,
-        Description,
-        Resources: ([.Resources[] | {
-            Type,
-            Id,
-            Partition,
-            Region
-        }]),
-        RecordState
-    }' "$file" > "$temp_file"
+    # Create a properly formatted findings array
+    echo '{"Findings": [' > "$temp_file"
+
+    # Extract and format each finding, joining them with commas
+    jq -c '.Findings[]' "$file" | sed '$!s/$/,/' >> "$temp_file"
+
+    # Close the array
+    echo ']}' >> "$temp_file"
 
     debug_log "Attempting to send findings..."
     debug_log "Content of findings file:"
     cat "$temp_file"
 
-    aws securityhub batch-import-findings --findings file://"$temp_file"
+    # Validate the final JSON
+    if validate_json "$temp_file"; then
+        debug_log "Final JSON is valid"
+        aws securityhub batch-import-findings --findings file://"$temp_file"
+    else
+        debug_log "Final JSON is invalid"
+        return 1
+    fi
 
     rm -f "$temp_file"
 }
