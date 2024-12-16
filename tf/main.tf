@@ -169,6 +169,12 @@ resource "aws_iam_role" "github_actions" {
   })
 }
 
+# Enable Security Hub integration with Aqua Security
+resource "aws_securityhub_product_subscription" "aqua" {
+  product_arn = "arn:aws:securityhub:${data.aws_region.current.name}::product/aquasecurity/aquasecurity"
+  depends_on  = [aws_securityhub_account.main]
+}
+
 # GitHub Actions Policies
 resource "aws_iam_role_policy" "github_actions_policy" {
   name = "github-actions-policy"
