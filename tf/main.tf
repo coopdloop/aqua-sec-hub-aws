@@ -202,12 +202,22 @@ resource "aws_iam_role_policy" "github_actions_policy" {
         Effect = "Allow"
         Action = [
           "securityhub:BatchImportFindings",
-          "securityhub:GetFindings"
+          "securityhub:GetFindings",
+          "securityhub:UpdateFindings"
         ]
         Resource = [
           "arn:aws:securityhub:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:hub/default",
+          "arn:aws:securityhub:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:security-product/aquasecurity/aquasecurity",
           "arn:aws:securityhub:${data.aws_region.current.name}::product/aquasecurity/aquasecurity"
         ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "securityhub:GetFindings",
+          "securityhub:BatchImportFindings"
+        ]
+        Resource = "*"
       }
     ]
   })
