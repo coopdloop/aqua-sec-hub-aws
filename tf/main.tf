@@ -210,17 +210,22 @@ resource "aws_iam_role_policy" "github_actions_policy" {
         Action = [
           "securityhub:BatchImportFindings",
           "securityhub:GetFindings",
+          "securityhub:UpdateFindings"
         ]
         Resource = [
           # Account-specific ARNs
-          "arn:aws:securityhub:${var.aws_region}:${data.aws_caller_identity.current.account_id}:product-subscription/aquasecurity/aquasecurity",
           "arn:aws:securityhub:${var.aws_region}:${data.aws_caller_identity.current.account_id}:hub/default",
-          "arn:aws:securityhub:${var.aws_region}:${data.aws_caller_identity.current.account_id}:security-product/aquasecurity/aquasecurity",
-          # Global ARNs
-          "arn:aws:securityhub:${var.aws_region}::product/aquasecurity/aquasecurity",
-          # Generic pattern for findings
-          "arn:aws:securityhub:${var.aws_region}:${data.aws_caller_identity.current.account_id}:finding/*"
+          "arn:aws:securityhub:${var.aws_region}:${data.aws_caller_identity.current.account_id}:security-product/aquasecurity/aquasecurity"
         ]
+      },
+      {
+        Sid    = "AllowSecurityHubAccess"
+        Effect = "Allow"
+        Action = [
+          "securityhub:GetFindings",
+          "securityhub:BatchImportFindings"
+        ]
+        Resource = "*"
       }
     ]
   })
