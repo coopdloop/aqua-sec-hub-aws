@@ -4,7 +4,76 @@ provider "aws" {
 }
 
 # Get current region data
+data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
+
+# Variables
+variable "github_org" {
+  description = "GitHub organization name"
+  type        = string
+}
+
+variable "github_repo" {
+  description = "GitHub repository name"
+  type        = string
+}
+
+# VPC and Network Configuration
+resource "aws_vpc" "main" {
+  cidr_block           = "10.0.0.0/16"
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+
+  tags = {
+    Name = "main"
+  }
+}
+
+resource "aws_subnet" "public_1" {
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = "10.0.1.0/24"
+  availability_zone = "us-east-1a"
+
+  tags = {
+    Name = "Public Subnet 1"
+  }
+}
+
+# Security Group
+resource "aws_security_group" "ecs_tasks" {
+  name        = "ecs-tasks-sg"
+  description = "Allow inbound traffic for ECS tasks"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    protocol    = "tcp"
+    from_port   = 80
+    to_port     = 80
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    protocol    = "-1"
+    from_port   = 0
+    to_port     = 0
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# ECR Repository
+resource "aws_ecr_repository" "demo_app" {
+  name                 = "demo-app"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+}
+
+# ECS Cluster
+resource "aws_ecs_cluster" "main" {
+  name = "demo-cluster"
+}
 
 # ECS Task Execution Role
 resource "aws_iam_role" "ecs_task_execution_role" {
@@ -30,43 +99,7 @@ resource "aws_iam_role_policy_attachment" "ecs_task_execution_role_policy" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
-# ECR Repository
-resource "aws_ecr_repository" "demo_app" {
-  name                 = "demo-app"
-  image_tag_mutability = "MUTABLE"
-
-  image_scanning_configuration {
-    scan_on_push = true
-  }
-}
-
-# VPC and Network Configuration
-resource "aws_vpc" "main" {
-  cidr_block           = "10.0.0.0/16"
-  enable_dns_hostnames = true
-  enable_dns_support   = true
-
-  tags = {
-    Name = "main"
-  }
-}
-
-resource "aws_subnet" "public_1" {
-  vpc_id            = aws_vpc.main.id
-  cidr_block        = "10.0.1.0/24"
-  availability_zone = "us-east-1a"
-
-  tags = {
-    Name = "Public Subnet 1"
-  }
-}
-
-# ECS Cluster
-resource "aws_ecs_cluster" "main" {
-  name = "demo-cluster"
-}
-
-# Task Definition
+# ECS Task Definition
 resource "aws_ecs_task_definition" "app" {
   family                   = "demo-app"
   requires_compatibilities = ["FARGATE"]
@@ -100,8 +133,84 @@ resource "aws_ecs_service" "main" {
 
   network_configuration {
     subnets          = [aws_subnet.public_1.id]
+    security_groups  = [aws_security_group.ecs_tasks.id]
     assign_public_ip = true
   }
+}
+
+# GitHub Actions OIDC Provider
+data "aws_iam_openid_connect_provider" "github_actions" {
+  url = "https://token.actions.githubusercontent.com"
+}
+
+# GitHub Actions Role
+resource "aws_iam_role" "github_actions" {
+  name = "github-actions-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRoleWithWebIdentity"
+        Effect = "Allow"
+        Principal = {
+          Federated = data.aws_iam_openid_connect_provider.github_actions.arn
+        }
+        Condition = {
+          StringEquals = {
+            "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+          }
+          StringLike = {
+            "token.actions.githubusercontent.com:sub" = "repo:${var.github_org}/${var.github_repo}:*"
+          }
+        }
+      }
+    ]
+  })
+}
+
+# GitHub Actions Policies
+resource "aws_iam_role_policy" "github_actions_policy" {
+  name = "github-actions-policy"
+  role = aws_iam_role.github_actions.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken",
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload",
+          "ecr:PutImage"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ecs:UpdateService"
+        ]
+        Resource = aws_ecs_service.main.id
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "securityhub:BatchImportFindings",
+          "securityhub:GetFindings"
+        ]
+        Resource = [
+          "arn:aws:securityhub:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:hub/default",
+          "arn:aws:securityhub:${data.aws_region.current.name}::product/aquasecurity/aquasecurity"
+        ]
+      }
+    ]
+  })
 }
 
 # Security Hub Enablement
@@ -112,7 +221,11 @@ resource "aws_securityhub_standards_subscription" "aws_foundation" {
   standards_arn = "arn:aws:securityhub:${data.aws_region.current.name}::standards/aws-foundational-security-best-practices/v/1.0.0"
 }
 
-# Output the ECR repository URL
-output "repository_url" {
+# Outputs
+output "ecr_repository_url" {
   value = aws_ecr_repository.demo_app.repository_url
+}
+
+output "github_actions_role_arn" {
+  value = aws_iam_role.github_actions.arn
 }
