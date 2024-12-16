@@ -169,12 +169,6 @@ resource "aws_iam_role" "github_actions" {
   })
 }
 
-# Enable Security Hub integration with Aqua Security
-resource "aws_securityhub_product_subscription" "aqua" {
-  product_arn = "arn:aws:securityhub:${data.aws_region.current.name}::product/aquasecurity/aquasecurity"
-  depends_on  = [aws_securityhub_account.main]
-}
-
 # GitHub Actions Policies
 resource "aws_iam_role_policy" "github_actions_policy" {
   name = "github-actions-policy"
@@ -211,7 +205,11 @@ resource "aws_iam_role_policy" "github_actions_policy" {
           "securityhub:GetFindings",
           "securityhub:UpdateFindings",
           "securityhub:GetInsights",
-          "securityhub:GetInsightResults"
+          "securityhub:GetInsightResults",
+          "securityhub:EnableSecurityHub",
+          "securityhub:GetEnabledStandards",
+          "securityhub:DescribeHub",
+          "securityhub:EnableImportFindingsForProduct"
         ]
         Resource = "*" # Simplified to allow all SecurityHub resources
       }
@@ -219,8 +217,14 @@ resource "aws_iam_role_policy" "github_actions_policy" {
   })
 }
 
-# Security Hub Enablement
+# Make sure Security Hub is enabled
 resource "aws_securityhub_account" "main" {}
+
+# Enable Aqua Security integration
+resource "aws_securityhub_product_subscription" "aqua" {
+  depends_on = [aws_securityhub_account.main]
+  product_arn = "arn:aws:securityhub:${data.aws_region.current.name}::product/aquasecurity/aquasecurity"
+}
 
 resource "aws_securityhub_standards_subscription" "aws_foundation" {
   depends_on    = [aws_securityhub_account.main]
