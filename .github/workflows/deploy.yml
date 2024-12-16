@@ -1,0 +1,48 @@
+# .github/workflows/deploy.yml
+name: Deploy and Scan
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  scan-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Build and push Docker image
+        run: |
+          docker build -t demo-app .
+          docker tag demo-app:latest ${{ steps.login-ecr.outputs.registry }}/demo-app:latest
+          docker push ${{ steps.login-ecr.outputs.registry }}/demo-app:latest
+
+      - name: Run Aqua Scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ steps.login-ecr.outputs.registry }}/demo-app:latest'
+          format: 'template'
+          template: '@/contrib/sarif.tpl'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Scan Results to Security Hub
+        run: |
+          aws securityhub batch-import-findings --findings file://trivy-results.sarif
+
+      - name: Deploy to ECS
+        run: |
+          aws ecs update-service --cluster demo-cluster --service demo-service --force-new-deployment
