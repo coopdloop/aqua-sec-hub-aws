@@ -25,6 +25,19 @@ variable "aws_region" {
   type        = string
 }
 
+# Variables for resource naming and tagging
+variable "project_name" {
+  description = "Project name to be used for resource naming"
+  type        = string
+  default     = "demo-app"
+}
+
+variable "environment" {
+  description = "Environment (dev/staging/prod)"
+  type        = string
+  default     = "dev"
+}
+
 # VPC and Network Configuration
 resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
@@ -152,7 +165,7 @@ data "aws_iam_openid_connect_provider" "github_actions" {
 
 # GitHub Actions Role
 resource "aws_iam_role" "github_actions" {
-  name = "github-actions-role"
+  name = "${var.project_name}-github-actions-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -174,11 +187,15 @@ resource "aws_iam_role" "github_actions" {
       }
     ]
   })
+  tags = {
+    Project     = var.project_name
+    Environment = var.environment
+  }
 }
 
-# GitHub Actions Policies
-resource "aws_iam_role_policy" "github_actions_policy" {
-  name = "github-actions-policy"
+# ECR Access Policy
+resource "aws_iam_role_policy" "ecr_access" {
+  name = "${var.project_name}-ecr-access"
   role = aws_iam_role.github_actions.id
 
   policy = jsonencode({
@@ -187,7 +204,13 @@ resource "aws_iam_role_policy" "github_actions_policy" {
       {
         Effect = "Allow"
         Action = [
-          "ecr:GetAuthorizationToken",
+          "ecr:GetAuthorizationToken"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
           "ecr:BatchCheckLayerAvailability",
           "ecr:GetDownloadUrlForLayer",
           "ecr:BatchGetImage",
@@ -196,25 +219,66 @@ resource "aws_iam_role_policy" "github_actions_policy" {
           "ecr:CompleteLayerUpload",
           "ecr:PutImage"
         ]
-        Resource = "*"
-      },
+        Resource = aws_ecr_repository.demo_app.arn
+      }
+    ]
+  })
+}
+
+# ECS Access Policy
+resource "aws_iam_role_policy" "ecs_access" {
+  name = "${var.project_name}-ecs-access"
+  role = aws_iam_role.github_actions.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
       {
         Effect = "Allow"
         Action = [
           "ecs:UpdateService"
         ]
-        Resource = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service/demo-cluster/demo-service"
-      },
-      # New broad Security Hub permissions
-      {
-        Effect = "Allow"
-        Action = [
-          "securityhub:*"
-        ]
-        Resource = "*"
+        Resource = aws_ecs_service.main.id
       }
     ]
   })
+}
+
+# Security Hub Access Policy
+resource "aws_iam_role_policy" "security_hub_access" {
+  name = "${var.project_name}-security-hub-access"
+  role = aws_iam_role.github_actions.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "securityhub:BatchImportFindings",
+          "securityhub:GetFindings"
+        ]
+        Resource = [
+          # Hub ARN
+          "arn:aws:securityhub:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:hub/default",
+          # Security findings
+          "arn:aws:securityhub:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:finding/*",
+          # Aqua Security integration
+          "arn:aws:securityhub:${data.aws_region.current.name}::product/aquasecurity/aquasecurity",
+          "arn:aws:securityhub:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:security-product/aquasecurity/aquasecurity"
+        ]
+      }
+    ]
+  })
+}
+
+# Add tags to all policies
+locals {
+  common_tags = {
+    Project     = var.project_name
+    Environment = var.environment
+    ManagedBy   = "terraform"
+  }
 }
 
 # Make sure Security Hub is enabled
