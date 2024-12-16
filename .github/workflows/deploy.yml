@@ -32,16 +32,16 @@ jobs:
           docker push ${{ steps.login-ecr.outputs.registry }}/demo-app:latest
 
       - name: Run Aqua Scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: '${{ steps.login-ecr.outputs.registry }}/demo-app:latest'
-          format: 'template'
-          template: '@/contrib/sarif.tpl'
-          output: 'trivy-results.sarif'
-
-      - name: Upload Scan Results to Security Hub
+        env:
+          AWS_REGION: us-east-1
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
         run: |
-          aws securityhub batch-import-findings --findings file://trivy-results.sarif
+          trivy image --format template --template "@contrib/asff.tpl" \
+            -o report.asff ${{ steps.login-ecr.outputs.registry }}/demo-app:latest
+
+      - name: Import findings to Security Hub
+        run: |
+          aws securityhub batch-import-findings --findings file://report.asff
 
       - name: Deploy to ECS
         run: |
