@@ -2,29 +2,51 @@
 
 set -e  # Exit on error
 
-# Process findings function
+# Enable debug logging
+DEBUG=true
+
+debug_log() {
+    if [ "$DEBUG" = true ]; then
+        echo "DEBUG: $1"
+    fi
+}
+
 process_findings() {
     local input_file=$1
     local output_file=$2
     local finding_type=$3
     local template=$4
 
-    echo "Processing $finding_type findings..."
+    echo "=== Processing $finding_type findings ==="
+    debug_log "Input file: $input_file"
+    debug_log "Output file: $output_file"
+    debug_log "Template: $template"
 
     if [ -f "$input_file" ]; then
+        debug_log "Input file exists"
+
         if [ -n "$template" ]; then
-            # Convert using template first
+            debug_log "Converting using template: $template"
+            debug_log "Template content:"
+            cat "$template"
+
+            debug_log "Input file content:"
+            cat "$input_file"
+
             if ! jq -f "$template" --arg AWS_REGION "$AWS_REGION" --arg AWS_ACCOUNT_ID "$AWS_ACCOUNT_ID" "$input_file" > "${output_file}.tmp"; then
-                echo "Failed to convert findings using template for $finding_type"
+                echo "ERROR: Failed to convert findings using template for $finding_type"
                 return 1
             fi
             mv "${output_file}.tmp" "$input_file"
+            debug_log "Conversion complete"
         fi
 
-        # Check if file has findings
+        debug_log "Counting findings..."
         local findings_count=$(jq '.Findings | length' "$input_file")
+        echo "Found $findings_count findings"
+
         if [ "$findings_count" -gt 0 ]; then
-            # Create properly formatted JSON
+            debug_log "Creating formatted JSON..."
             jq --arg account "$AWS_ACCOUNT_ID" \
                --arg region "$AWS_REGION" \
                --arg type "$finding_type" \
@@ -38,8 +60,21 @@ process_findings() {
                   }
                 ]' "$input_file" > "$output_file"
 
+            debug_log "Final output content:"
+            cat "$output_file"
+
             echo "Importing $findings_count findings to Security Hub..."
+            debug_log "AWS Region: $AWS_REGION"
+            debug_log "AWS Account ID: $AWS_ACCOUNT_ID"
+
+            # Test AWS CLI credentials
+            debug_log "Testing AWS credentials..."
+            aws sts get-caller-identity
+
+            # Import findings with debug
+            set -x  # Enable command printing
             aws securityhub batch-import-findings --cli-input-json "file://$output_file"
+            set +x  # Disable command printing
         else
             echo "No findings to report for $finding_type"
         fi
@@ -117,6 +152,11 @@ cat << 'EOF' > .github/templates/secrets-to-asff.jq
 EOF
 
 # Process all finding types
+echo "Starting findings processing..."
+debug_log "Current directory: $(pwd)"
+debug_log "Listing files:"
+ls -la
+
 process_findings "report.asff" "vuln-findings.json" "Vulnerabilities"
 
 if [ -f "iac-report.json" ]; then
