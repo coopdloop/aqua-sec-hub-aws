@@ -50,7 +50,7 @@ jobs:
           format: 'template'
           template: '@templates/asff.tpl'
           output: 'report.asff'
-          severity: 'CRITICAL,HIGH'
+          severity: 'CRITICAL,HIGH,MEDIUM'
           scanners: 'vuln'  # Disable secret scanning for speed
         env:
           AWS_REGION: us-east-1
@@ -65,30 +65,27 @@ jobs:
             echo "Original file content:"
             cat report.asff
 
-            echo -e "\nFormatting JSON..."
-            jq '.' report.asff > report.formatted.asff
+            echo -e "\nChecking if findings exist..."
+            FINDINGS_COUNT=$(jq '.Findings | length' report.asff)
 
-            echo -e "\nFormatted JSON content:"
-            cat report.formatted.asff
+            if [ "$FINDINGS_COUNT" -gt 0 ]; then
+              echo -e "\nFound $FINDINGS_COUNT findings. Processing..."
 
-            # Validate JSON
-            if jq empty report.formatted.asff 2>/dev/null; then
-              echo -e "\nJSON is valid. Adding required fields..."
-
-              # Replace empty fields and create compact JSON
-              jq -c '.Findings[] |= (
-                if .AwsAccountId == "" then .AwsAccountId = env.AWS_ACCOUNT_ID else . end |
-                if .Region == "" then .Region = env.AWS_REGION else . end
-              )' report.formatted.asff > report.final.asff
+              # Create a temporary file with proper JSON formatting
+              jq -c '.Findings = [.Findings[] |
+                . + {
+                  "AwsAccountId": (if .AwsAccountId == "" then env.AWS_ACCOUNT_ID else .AwsAccountId end),
+                  "Region": (if .Region == "" then env.AWS_REGION else .Region end)
+                }
+              ]' report.asff > report.final.asff
 
               echo -e "\nFinal JSON content:"
               cat report.final.asff
 
               echo -e "\nImporting to Security Hub..."
-              cat report.final.asff | jq -c '.' | aws securityhub batch-import-findings --findings file:///dev/stdin
+              aws securityhub batch-import-findings --findings "file://report.final.asff"
             else
-              echo "Invalid JSON in report.asff"
-              exit 1
+              echo "No findings to report"
             fi
           else
             echo "No vulnerability findings file found"
@@ -104,9 +101,8 @@ jobs:
           scan-type: 'config'
           scan-ref: '.'
           format: 'sarif'
-          # template: '@templates/asff.tpl'
           output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH'
+          severity: 'CRITICAL,HIGH,MEDIUM'
         # env:
         #   AWS_REGION: us-east-1
         #   AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
