@@ -213,14 +213,7 @@ resource "aws_iam_role_policy" "github_actions_policy" {
           "securityhub:GetInsights",
           "securityhub:GetInsightResults"
         ]
-        Resource = [
-          "arn:aws:securityhub:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:hub/default",
-          "arn:aws:securityhub:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:security-product/*/*",
-          "arn:aws:securityhub:${data.aws_region.current.name}::product/aquasecurity/aquasecurity",
-          "arn:aws:securityhub:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:security-product/aquasecurity/aquasecurity",
-          # Allow findings for any product
-          "arn:aws:securityhub:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:finding/*"
-        ]
+        Resource = "*" # Simplified to allow all SecurityHub resources
       }
     ]
   })
