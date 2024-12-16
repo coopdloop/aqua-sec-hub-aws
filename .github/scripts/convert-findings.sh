@@ -20,6 +20,13 @@ validate_json() {
     fi
 }
 
+has_findings() {
+    local file=$1
+    local count=$(jq '.Findings | length' "$file")
+    debug_log "Found $count findings in $file"
+    [ "$count" -gt 0 ]
+}
+
 send_to_security_hub() {
     local file=$1
     local temp_file="temp_findings.json"
@@ -29,7 +36,6 @@ send_to_security_hub() {
         Findings: [.Findings[] | {
             SchemaVersion,
             Id,
-            # Use global product ARN format
             ProductArn: "arn:aws:securityhub:\($region)::product/aquasecurity/aquasecurity",
             GeneratorId,
             AwsAccountId: $account,
@@ -53,12 +59,16 @@ send_to_security_hub() {
     debug_log "Content of findings file:"
     jq '.' "$temp_file"  # Pretty print for debug
 
-    aws securityhub batch-import-findings --cli-input-json "file://$temp_file"
+    # Only send if there are findings
+    if has_findings "$temp_file"; then
+        aws securityhub batch-import-findings --cli-input-json "file://$temp_file"
+    else
+        debug_log "No findings to send, skipping Security Hub import"
+    fi
 
     rm -f "$temp_file"
 }
 
-# Rest of the script remains the same
 process_findings() {
     local input_file=$1
     local output_file=$2
@@ -87,7 +97,11 @@ process_findings() {
         fi
 
         debug_log "Importing findings to Security Hub..."
-        send_to_security_hub "$output_file"
+        if has_findings "$output_file"; then
+            send_to_security_hub "$output_file"
+        else
+            debug_log "No findings to import for $finding_type"
+        fi
     else
         echo "No $finding_type findings file found at $input_file"
     fi
@@ -102,7 +116,11 @@ ls -la
 if [ -f "report.asff" ]; then
     debug_log "Processing vulnerability report..."
     if validate_json "report.asff"; then
-        send_to_security_hub "report.asff"
+        if has_findings "report.asff"; then
+            send_to_security_hub "report.asff"
+        else
+            debug_log "No vulnerability findings to report"
+        fi
     else
         echo "ERROR: Invalid JSON in report.asff"
         exit 1
