@@ -212,13 +212,14 @@ resource "aws_iam_role_policy" "github_actions_policy" {
           "securityhub:GetFindings",
         ]
         Resource = [
-          # This is your specific Security Hub product subscription ARN
+          # Account-specific ARNs
           "arn:aws:securityhub:${var.aws_region}:${data.aws_caller_identity.current.account_id}:product-subscription/aquasecurity/aquasecurity",
-          # This is your hub ARN
           "arn:aws:securityhub:${var.aws_region}:${data.aws_caller_identity.current.account_id}:hub/default",
-          # This is the Aqua Security product ARN
-          "arn:aws:securityhub:${var.aws_region}:${data.aws_caller_identity.current.account_id}:security-product/aquasecurity/aquasecurity"
-
+          "arn:aws:securityhub:${var.aws_region}:${data.aws_caller_identity.current.account_id}:security-product/aquasecurity/aquasecurity",
+          # Global ARNs
+          "arn:aws:securityhub:${var.aws_region}::product/aquasecurity/aquasecurity",
+          # Generic pattern for findings
+          "arn:aws:securityhub:${var.aws_region}:${data.aws_caller_identity.current.account_id}:finding/*"
         ]
       }
     ]

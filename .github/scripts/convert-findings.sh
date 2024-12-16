@@ -24,14 +24,14 @@ send_to_security_hub() {
     local file=$1
     local temp_file="temp_findings.json"
 
-    # Format the findings using jq to handle escaping and formatting
-    jq -c '{
+   # Format the findings using jq to handle escaping and formatting
+    jq -c --arg account "$AWS_ACCOUNT_ID" --arg region "$AWS_REGION" '{
         Findings: [.Findings[] | {
             SchemaVersion,
             Id,
-            ProductArn,
+            ProductArn: "arn:aws:securityhub:\($region):\($account):product/aquasecurity/aquasecurity",
             GeneratorId,
-            AwsAccountId,
+            AwsAccountId: $account,
             Types,
             CreatedAt,
             UpdatedAt,
@@ -42,7 +42,7 @@ send_to_security_hub() {
                 Type,
                 Id,
                 Partition,
-                Region
+                Region: $region
             }],
             RecordState
         }]
@@ -52,7 +52,6 @@ send_to_security_hub() {
     debug_log "Content of findings file:"
     jq '.' "$temp_file"  # Pretty print for debug
 
-    # Send the findings to Security Hub
     aws securityhub batch-import-findings --cli-input-json "file://$temp_file"
 
     rm -f "$temp_file"
