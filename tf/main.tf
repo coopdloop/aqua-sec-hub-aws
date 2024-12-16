@@ -203,27 +203,13 @@ resource "aws_iam_role_policy" "github_actions_policy" {
         Action = [
           "ecs:UpdateService"
         ]
-        Resource = aws_ecs_service.main.id
+        Resource = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service/demo-cluster/demo-service"
       },
+      # New broad Security Hub permissions
       {
         Effect = "Allow"
         Action = [
-          "securityhub:BatchImportFindings",
-          "securityhub:GetFindings",
-          "securityhub:UpdateFindings"
-        ]
-        Resource = [
-          # Account-specific ARNs
-          "arn:aws:securityhub:${var.aws_region}:${data.aws_caller_identity.current.account_id}:hub/default",
-          "arn:aws:securityhub:${var.aws_region}:${data.aws_caller_identity.current.account_id}:security-product/aquasecurity/aquasecurity"
-        ]
-      },
-      {
-        Sid    = "AllowSecurityHubAccess"
-        Effect = "Allow"
-        Action = [
-          "securityhub:GetFindings",
-          "securityhub:BatchImportFindings"
+          "securityhub:*"
         ]
         Resource = "*"
       }
