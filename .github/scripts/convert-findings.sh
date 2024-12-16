@@ -24,12 +24,13 @@ send_to_security_hub() {
     local file=$1
     local temp_file="temp_findings.json"
 
-   # Format the findings using jq to handle escaping and formatting
+    # Format the findings using jq to handle escaping and formatting
     jq -c --arg account "$AWS_ACCOUNT_ID" --arg region "$AWS_REGION" '{
         Findings: [.Findings[] | {
             SchemaVersion,
             Id,
-            ProductArn: "arn:aws:securityhub:\($region):\($account):product/aquasecurity/aquasecurity",
+            # Use global product ARN format
+            ProductArn: "arn:aws:securityhub:\($region)::product/aquasecurity/aquasecurity",
             GeneratorId,
             AwsAccountId: $account,
             Types,
