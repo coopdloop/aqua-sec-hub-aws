@@ -19,13 +19,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Setup Trivy with explicit version and caching
-      - name: Setup Trivy
-        uses: aquasecurity/setup-trivy@v0.2.2
-        with:
-          version: "0.48.3"
-          cache: true
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
@@ -90,8 +83,9 @@ jobs:
         uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: 'config'
-          format: 'sarif'
-          output: 'iac-results.sarif'
+          scan-ref: '.'
+          format: 'json'
+          output: 'iac-results.json'
           severity: 'CRITICAL,HIGH'
         # env:
         #   AWS_REGION: us-east-1
@@ -102,9 +96,62 @@ jobs:
         uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: 'fs'
-          format: 'github'
+          scan-ref: '.'
+          format: 'cyclonedx'
           output: 'sbom-results.json'
-          github-pat: ${{ secrets.GITHUB_TOKEN }}
+          # github-pat: ${{ secrets.GITHUB_TOKEN }}
+      # Convert findings for Security Hub
+      - name: Prepare Security Hub findings
+        run: |
+          cat > findings.json << EOF
+          {
+            "Findings": [
+              {
+                "SchemaVersion": "2018-10-08",
+                "Id": "trivy-vuln-$(date +%s)",
+                "ProductArn": "arn:aws:securityhub:${AWS_REGION}:${AWS_ACCOUNT_ID}:product/aquasec/aquasec",
+                "GeneratorId": "Trivy",
+                "AwsAccountId": "${AWS_ACCOUNT_ID}",
+                "Types": [ "Software and Configuration Checks/Vulnerabilities" ],
+                "CreatedAt": "$(date --utc +%Y-%m-%dT%H:%M:%S.%3NZ)",
+                "UpdatedAt": "$(date --utc +%Y-%m-%dT%H:%M:%S.%3NZ)",
+                "Severity": { "Label": "HIGH" },
+                "Title": "Container Image Vulnerabilities",
+                "Description": "$(cat vuln-results.json | jq -c -r .)",
+                "Resources": [
+                  {
+                    "Type": "Container",
+                    "Id": "${{ steps.login-ecr.outputs.registry }}/demo-app:${{ github.sha }}",
+                    "Region": "${AWS_REGION}"
+                  }
+                ]
+              },
+              {
+                "SchemaVersion": "2018-10-08",
+                "Id": "trivy-iac-$(date +%s)",
+                "ProductArn": "arn:aws:securityhub:${AWS_REGION}:${AWS_ACCOUNT_ID}:product/aquasec/aquasec",
+                "GeneratorId": "Trivy",
+                "AwsAccountId": "${AWS_ACCOUNT_ID}",
+                "Types": [ "Software and Configuration Checks/Infrastructure Code Scan" ],
+                "CreatedAt": "$(date --utc +%Y-%m-%dT%H:%M:%S.%3NZ)",
+                "UpdatedAt": "$(date --utc +%Y-%m-%dT%H:%M:%S.%3NZ)",
+                "Severity": { "Label": "HIGH" },
+                "Title": "Infrastructure as Code Findings",
+                "Description": "$(cat iac-results.json | jq -c -r .)",
+                "Resources": [
+                  {
+                    "Type": "Other",
+                    "Id": "IaC-Scan-${{ github.sha }}",
+                    "Region": "${AWS_REGION}"
+                  }
+                ]
+              }
+            ]
+          }
+          EOF
+        env:
+          AWS_REGION: us-east-1
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
 
       # Upload results to Security Hub
       - name: Import findings to Security Hub
@@ -124,6 +171,7 @@ jobs:
         uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: 'fs'
+          scan-ref: '.'
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
