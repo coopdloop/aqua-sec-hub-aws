@@ -24,15 +24,33 @@ send_to_security_hub() {
     local file=$1
     local temp_file="temp_findings.json"
 
-    # Format the JSON and ensure it's in the correct format
-    jq -c '.' "$file" > "$temp_file"
+    # Extract the Findings array and format each finding correctly
+    jq -c '.Findings[] | {
+        SchemaVersion,
+        Id,
+        ProductArn,
+        GeneratorId,
+        AwsAccountId,
+        Types,
+        CreatedAt,
+        UpdatedAt,
+        Severity,
+        Title,
+        Description,
+        Resources: ([.Resources[] | {
+            Type,
+            Id,
+            Partition,
+            Region
+        }]),
+        RecordState
+    }' "$file" > "$temp_file"
 
     debug_log "Attempting to send findings..."
     debug_log "Content of findings file:"
     cat "$temp_file"
 
-    # Try sending with proper quoting
-    aws securityhub batch-import-findings --findings="$(cat $temp_file)"
+    aws securityhub batch-import-findings --findings file://"$temp_file"
 
     rm -f "$temp_file"
 }
