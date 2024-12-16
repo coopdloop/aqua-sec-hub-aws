@@ -62,28 +62,34 @@ jobs:
         if: always()
         run: |
           if [ -f "report.asff" ]; then
-            echo "Original file content:"
-            cat report.asff
-
-            echo -e "\nChecking if findings exist..."
+            echo "Processing findings..."
             FINDINGS_COUNT=$(jq '.Findings | length' report.asff)
 
             if [ "$FINDINGS_COUNT" -gt 0 ]; then
-              echo -e "\nFound $FINDINGS_COUNT findings. Processing..."
+              echo "Found $FINDINGS_COUNT findings. Processing..."
 
-              # Create a temporary file with proper JSON formatting
-              jq -c '.Findings = [.Findings[] |
-                . + {
-                  "AwsAccountId": (if .AwsAccountId == "" then env.AWS_ACCOUNT_ID else .AwsAccountId end),
-                  "Region": (if .Region == "" then env.AWS_REGION else .Region end)
-                }
-              ]' report.asff > report.final.asff
+              # Create a properly formatted JSON file with escaped newlines and quotes
+              jq --arg account "$AWS_ACCOUNT_ID" --arg region "$AWS_REGION" '
+                .Findings = [.Findings[] |
+                  . + {
+                    AwsAccountId: $account,
+                    Region: $region,
+                    Description: (.Description | gsub("\n";" ")),
+                    RecordState: "ACTIVE"
+                  }
+                ]' report.asff > report.tmp.json
 
-              echo -e "\nFinal JSON content:"
-              cat report.final.asff
+              # Validate the JSON and create the final compact version
+              jq -c '.' report.tmp.json > report.final.json
 
-              echo -e "\nImporting to Security Hub..."
-              aws securityhub batch-import-findings --findings "file://report.final.asff"
+              # Debug: Show file size and first few lines
+              echo "File size: $(wc -c < report.final.json) bytes"
+              echo "First 500 characters:"
+              head -c 500 report.final.json
+
+              echo "Importing to Security Hub..."
+              # Use --cli-input-json instead of --findings
+              aws securityhub batch-import-findings --cli-input-json "file://report.final.json"
             else
               echo "No findings to report"
             fi
