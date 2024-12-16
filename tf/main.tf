@@ -5,6 +5,7 @@ provider "aws" {
 
 # Get current region data
 data "aws_caller_identity" "current" {}
+
 data "aws_region" "current" {}
 
 # Variables
@@ -15,6 +16,12 @@ variable "github_org" {
 
 variable "github_repo" {
   description = "GitHub repository name"
+  type        = string
+}
+
+
+variable "aws_region" {
+  description = "aws_region name"
   type        = string
 }
 
@@ -203,15 +210,16 @@ resource "aws_iam_role_policy" "github_actions_policy" {
         Action = [
           "securityhub:BatchImportFindings",
           "securityhub:GetFindings",
-          "securityhub:UpdateFindings",
-          "securityhub:GetInsights",
-          "securityhub:GetInsightResults",
-          "securityhub:EnableSecurityHub",
-          "securityhub:GetEnabledStandards",
-          "securityhub:DescribeHub",
-          "securityhub:EnableImportFindingsForProduct"
         ]
-        Resource = "*" # Simplified to allow all SecurityHub resources
+        Resource = [
+          # This is your specific Security Hub product subscription ARN
+          "arn:aws:securityhub:${var.aws_region}:${data.aws_caller_identity.current.account_id}:product-subscription/aquasecurity/aquasecurity",
+          # This is your hub ARN
+          "arn:aws:securityhub:${var.aws_region}:${data.aws_caller_identity.current.account_id}:hub/default",
+          # This is the Aqua Security product ARN
+          "arn:aws:securityhub:${var.aws_region}:${data.aws_caller_identity.current.account_id}:security-product/aquasecurity/aquasecurity"
+
+        ]
       }
     ]
   })
@@ -222,7 +230,7 @@ resource "aws_securityhub_account" "main" {}
 
 # Enable Aqua Security integration
 resource "aws_securityhub_product_subscription" "aqua" {
-  depends_on = [aws_securityhub_account.main]
+  depends_on  = [aws_securityhub_account.main]
   product_arn = "arn:aws:securityhub:${data.aws_region.current.name}::product/aquasecurity/aquasecurity"
 }
 
