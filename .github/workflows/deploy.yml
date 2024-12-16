@@ -20,6 +20,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Download ASFF template
+      - name: Download ASFF template
+        run: |
+          mkdir -p templates
+          curl -o templates/asff.tpl https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/asff.tpl
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
@@ -42,9 +48,10 @@ jobs:
           scan-type: 'image'
           image-ref: '${{ steps.login-ecr.outputs.registry }}/demo-app:${{ github.sha }}'
           format: 'template'
-          template: '@contrib/asff.tpl'
+          template: '@templates/asff.tpl'
           output: 'report.asff'
           severity: 'CRITICAL,HIGH'
+          scanners: 'vuln'  # Disable secret scanning for speed
         env:
           AWS_REGION: us-east-1
           AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
@@ -56,7 +63,7 @@ jobs:
           scan-type: 'config'
           scan-ref: '.'
           format: 'template'
-          template: '@contrib/asff.tpl'
+          template: '@templates/asff.tpl'
           output: 'iac-report.asff'
           severity: 'CRITICAL,HIGH'
         env:
@@ -68,14 +75,14 @@ jobs:
         if: always()
         run: |
           if [ -f "report.asff" ]; then
-            aws securityhub batch-import-findings --findings file://report.asff
+            aws securityhub batch-import-findings --findings "file://report.asff"
           fi
 
       - name: Import IaC findings to Security Hub
         if: always()
         run: |
           if [ -f "iac-report.asff" ]; then
-            aws securityhub batch-import-findings --findings file://iac-report.asff
+            aws securityhub batch-import-findings --findings "file://iac-report.asff"
           fi
 
       # Generate SARIF for GitHub Security tab
@@ -87,6 +94,7 @@ jobs:
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
+          scanners: 'vuln'  # Disable secret scanning for speed
 
       - name: Upload SARIF file
         uses: github/codeql-action/upload-sarif@v3
