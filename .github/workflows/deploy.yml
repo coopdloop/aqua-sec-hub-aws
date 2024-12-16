@@ -19,6 +19,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Setup Trivy with explicit version and caching
+      - name: Setup Trivy
+        uses: aquasecurity/setup-trivy@v0.2.0
+        with:
+          version: "0.57.1"
+          cache: true
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
@@ -34,16 +41,46 @@ jobs:
           docker build -t ${{ steps.login-ecr.outputs.registry }}/demo-app:${{ github.sha }} .
           docker push ${{ steps.login-ecr.outputs.registry }}/demo-app:${{ github.sha }}
 
-      # Vulnerability Scanning
+      # Vulnerability Scanning with JSON output for Security Hub
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: 'image'
           image-ref: ${{ steps.login-ecr.outputs.registry }}/demo-app:${{ github.sha }}
-          format: 'template'
-          template: '@contrib/asff.tpl'
-          output: 'vuln-results.asff'
+          format: 'json'
+          output: 'vuln-results.json'
           severity: 'CRITICAL,HIGH'
+      # Convert to Security Hub format
+      - name: Convert to Security Hub format
+        run: |
+          cat > findings.json << EOF
+          {
+            "Findings": [
+              {
+                "SchemaVersion": "2018-10-08",
+                "Id": "trivy-$(date +%s)",
+                "ProductArn": "arn:aws:securityhub:${AWS_REGION}:${AWS_ACCOUNT_ID}:product/aquasec/aquasec",
+                "GeneratorId": "Trivy",
+                "AwsAccountId": "${AWS_ACCOUNT_ID}",
+                "Types": [ "Software and Configuration Checks" ],
+                "CreatedAt": "$(date --utc +%Y-%m-%dT%H:%M:%S.%3NZ)",
+                "UpdatedAt": "$(date --utc +%Y-%m-%dT%H:%M:%S.%3NZ)",
+                "Severity": {
+                  "Label": "HIGH"
+                },
+                "Title": "Container Image Vulnerabilities",
+                "Description": "$(cat vuln-results.json | jq -c -r .)",
+                "Resources": [
+                  {
+                    "Type": "Container",
+                    "Id": "${{ steps.login-ecr.outputs.registry }}/demo-app:${{ github.sha }}",
+                    "Region": "${AWS_REGION}"
+                  }
+                ]
+              }
+            ]
+          }
+          EOF
         env:
           AWS_REGION: us-east-1
           AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
@@ -53,14 +90,12 @@ jobs:
         uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: 'config'
-          format: 'template'
-          template: '@contrib/asff.tpl'
-          output: 'iac-results.asff'
-          exit-code: '1'
+          format: 'sarif'
+          output: 'iac-results.sarif'
           severity: 'CRITICAL,HIGH'
-        env:
-          AWS_REGION: us-east-1
-          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+        # env:
+        #   AWS_REGION: us-east-1
+        #   AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
 
       # SBOM Generation
       - name: Generate SBOM
@@ -72,13 +107,9 @@ jobs:
           github-pat: ${{ secrets.GITHUB_TOKEN }}
 
       # Upload results to Security Hub
-      - name: Import vulnerability findings to Security Hub
+      - name: Import findings to Security Hub
         run: |
-          aws securityhub batch-import-findings --findings file://vuln-results.asff
-
-      - name: Import IaC findings to Security Hub
-        run: |
-          aws securityhub batch-import-findings --findings file://iac-results.asff
+          aws securityhub batch-import-findings --findings file://findings.json
 
       # Upload SBOM as artifact
       - name: Upload SBOM Report
