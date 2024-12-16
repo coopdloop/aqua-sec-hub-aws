@@ -5,15 +5,19 @@ on:
   push:
     branches: [ main ]
 
+permissions:
+  contents: read
+  security-events: write # For GitHub Security tab
+  id-token: write # For AWS OIDC
+
 jobs:
-  scan-and-deploy:
+  security-scan:
+    name: Security Scan
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
 
     steps:
-      - uses: actions/checkout@v2
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
@@ -27,22 +31,80 @@ jobs:
 
       - name: Build and push Docker image
         run: |
-          docker build -t demo-app .
-          docker tag demo-app:latest ${{ steps.login-ecr.outputs.registry }}/demo-app:latest
-          docker push ${{ steps.login-ecr.outputs.registry }}/demo-app:latest
+          docker build -t ${{ steps.login-ecr.outputs.registry }}/demo-app:${{ github.sha }} .
+          docker push ${{ steps.login-ecr.outputs.registry }}/demo-app:${{ github.sha }}
 
-      - name: Run Aqua Scanner
+      # Vulnerability Scanning
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: 'image'
+          image-ref: ${{ steps.login-ecr.outputs.registry }}/demo-app:${{ github.sha }}
+          format: 'template'
+          template: '@contrib/asff.tpl'
+          output: 'vuln-results.asff'
+          severity: 'CRITICAL,HIGH'
         env:
           AWS_REGION: us-east-1
           AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-        run: |
-          trivy image --format template --template "@contrib/asff.tpl" \
-            -o report.asff ${{ steps.login-ecr.outputs.registry }}/demo-app:latest
 
-      - name: Import findings to Security Hub
-        run: |
-          aws securityhub batch-import-findings --findings file://report.asff
+      # Infrastructure as Code Scanning
+      - name: Run Trivy IaC scanner
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: 'config'
+          format: 'template'
+          template: '@contrib/asff.tpl'
+          output: 'iac-results.asff'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+        env:
+          AWS_REGION: us-east-1
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
 
+      # SBOM Generation
+      - name: Generate SBOM
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: 'fs'
+          format: 'github'
+          output: 'sbom-results.json'
+          github-pat: ${{ secrets.GITHUB_TOKEN }}
+
+      # Upload results to Security Hub
+      - name: Import vulnerability findings to Security Hub
+        run: |
+          aws securityhub batch-import-findings --findings file://vuln-results.asff
+
+      - name: Import IaC findings to Security Hub
+        run: |
+          aws securityhub batch-import-findings --findings file://iac-results.asff
+
+      # Upload SBOM as artifact
+      - name: Upload SBOM Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-report
+          path: sbom-results.json
+          retention-days: 90
+
+      # Also generate SARIF for GitHub Security tab
+      - name: Run Trivy for GitHub Security Tab
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: 'fs'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload SARIF file
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      # Deploy if all checks pass
       - name: Deploy to ECS
+        if: success()
         run: |
           aws ecs update-service --cluster demo-cluster --service demo-service --force-new-deployment
