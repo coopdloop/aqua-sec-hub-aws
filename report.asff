@@ -1,0 +1,94 @@
+{
+    "Findings": [
+        {
+            "SchemaVersion": "2018-10-08",
+            "Id": "nginx:alpine (alpine 3.20.3)/CVE-2024-11053",
+            "ProductArn": "arn:aws:securityhub:::product/aquasecurity/aquasecurity",
+            "GeneratorId": "Trivy/CVE-2024-11053",
+            "AwsAccountId": "",
+            "Types": [ "Software and Configuration Checks/Vulnerabilities/CVE" ],
+            "CreatedAt": "2024-12-16T13:14:38.978384-06:00",
+            "UpdatedAt": "2024-12-16T13:14:38.978392-06:00",
+            "Severity": {
+                "Label": "MEDIUM"
+            },
+            "Title": "Trivy found a vulnerability to CVE-2024-11053 in container nginx:alpine (alpine 3.20.3), related to curl",
+            "Description": "When asked to both use a `.netrc` file for credentials and to follow HTTP\nredirects, curl could leak the password used for the first host to the\nfollowed-to host under certain circumstances.\n\nThis flaw only manifests itself if the netrc file has an entry that matches\nthe redirect target hostname but the entry either omits just the password or\nomits both login and password.",
+            "Remediation": {
+                "Recommendation": {
+                    "Text": "More information on this vulnerability is provided in the hyperlink",
+                    "Url": "https://avd.aquasec.com/nvd/cve-2024-11053"
+                }
+            },
+            "ProductFields": { "Product Name": "Trivy" },
+            "Resources": [
+                {
+                    "Type": "Container",
+                    "Id": "nginx:alpine (alpine 3.20.3)",
+                    "Partition": "aws",
+                    "Region": "",
+                    "Details": {
+                        "Container": { "ImageName": "nginx:alpine (alpine 3.20.3)" },
+                        "Other": {
+                            "CVE ID": "CVE-2024-11053",
+                            "CVE Title": "curl: curl netrc password leak",
+                            "PkgName": "curl",
+                            "Installed Package": "8.11.0-r2",
+                            "Patched Package": "8.11.1-r0",
+                            "NvdCvssScoreV3": "0",
+                            "NvdCvssVectorV3": "",
+                            "NvdCvssScoreV2": "0",
+                            "NvdCvssVectorV2": ""
+                        }
+                    }
+                }
+            ],
+            "RecordState": "ACTIVE"
+        },
+        {
+            "SchemaVersion": "2018-10-08",
+            "Id": "nginx:alpine (alpine 3.20.3)/CVE-2024-11053",
+            "ProductArn": "arn:aws:securityhub:::product/aquasecurity/aquasecurity",
+            "GeneratorId": "Trivy/CVE-2024-11053",
+            "AwsAccountId": "",
+            "Types": [ "Software and Configuration Checks/Vulnerabilities/CVE" ],
+            "CreatedAt": "2024-12-16T13:14:38.97865-06:00",
+            "UpdatedAt": "2024-12-16T13:14:38.978655-06:00",
+            "Severity": {
+                "Label": "MEDIUM"
+            },
+            "Title": "Trivy found a vulnerability to CVE-2024-11053 in container nginx:alpine (alpine 3.20.3), related to libcurl",
+            "Description": "When asked to both use a `.netrc` file for credentials and to follow HTTP\nredirects, curl could leak the password used for the first host to the\nfollowed-to host under certain circumstances.\n\nThis flaw only manifests itself if the netrc file has an entry that matches\nthe redirect target hostname but the entry either omits just the password or\nomits both login and password.",
+            "Remediation": {
+                "Recommendation": {
+                    "Text": "More information on this vulnerability is provided in the hyperlink",
+                    "Url": "https://avd.aquasec.com/nvd/cve-2024-11053"
+                }
+            },
+            "ProductFields": { "Product Name": "Trivy" },
+            "Resources": [
+                {
+                    "Type": "Container",
+                    "Id": "nginx:alpine (alpine 3.20.3)",
+                    "Partition": "aws",
+                    "Region": "",
+                    "Details": {
+                        "Container": { "ImageName": "nginx:alpine (alpine 3.20.3)" },
+                        "Other": {
+                            "CVE ID": "CVE-2024-11053",
+                            "CVE Title": "curl: curl netrc password leak",
+                            "PkgName": "libcurl",
+                            "Installed Package": "8.11.0-r2",
+                            "Patched Package": "8.11.1-r0",
+                            "NvdCvssScoreV3": "0",
+                            "NvdCvssVectorV3": "",
+                            "NvdCvssScoreV2": "0",
+                            "NvdCvssVectorV2": ""
+                        }
+                    }
+                }
+            ],
+            "RecordState": "ACTIVE"
+        }
+    ]
+}

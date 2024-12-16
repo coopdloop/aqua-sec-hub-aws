@@ -52,6 +52,29 @@ jobs:
           output: 'report.asff'
           severity: 'CRITICAL,HIGH'
           scanners: 'vuln'  # Disable secret scanning for speed
+      # Process and validate vulnerability findings
+      - name: Process vulnerability findings
+        if: always()
+        run: |
+          if [ -f "report.asff" ]; then
+            # Format JSON and validate
+            cat report.asff | jq '.' > report.formatted.asff
+            if jq empty report.formatted.asff 2>/dev/null; then
+              # Replace empty strings for required fields
+              jq '.Findings[] |= (
+                if .AwsAccountId == "" then .AwsAccountId = env.AWS_ACCOUNT_ID else . end |
+                if .Region == "" then .Region = env.AWS_REGION else . end
+              )' report.formatted.asff > report.final.asff
+
+              echo "Findings file validated and processed"
+              aws securityhub batch-import-findings --findings file://report.final.asff
+            else
+              echo "Invalid JSON in report.asff"
+              exit 1
+            fi
+          else
+            echo "No vulnerability findings file found"
+          fi
         env:
           AWS_REGION: us-east-1
           AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
@@ -62,45 +85,35 @@ jobs:
         with:
           scan-type: 'config'
           scan-ref: '.'
-          format: 'template'
-          template: '@templates/asff.tpl'
-          output: 'iac-report.asff'
-          severity: 'CRITICAL,HIGH'
-        env:
-          AWS_REGION: us-east-1
-          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-
-      # Upload results to Security Hub
-      - name: Import vulnerability findings to Security Hub
-        if: always()
-        run: |
-          if [ -f "report.asff" ]; then
-            aws securityhub batch-import-findings --findings "file://report.asff"
-          fi
-
-      - name: Import IaC findings to Security Hub
-        if: always()
-        run: |
-          if [ -f "iac-report.asff" ]; then
-            aws securityhub batch-import-findings --findings "file://iac-report.asff"
-          fi
-
-      # Generate SARIF for GitHub Security tab
-      - name: Run Trivy for GitHub Security Tab
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          scan-type: 'fs'
-          scan-ref: '.'
           format: 'sarif'
+          # template: '@templates/asff.tpl'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
-          scanners: 'vuln'  # Disable secret scanning for speed
-
+        # env:
+        #   AWS_REGION: us-east-1
+        #   AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+        #
+      # Upload SARIF file
       - name: Upload SARIF file
         uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        if: always() && hashFiles('trivy-results.sarif') != ''
         with:
           sarif_file: 'trivy-results.sarif'
+
+      # # Upload results to Security Hub
+      # - name: Import vulnerability findings to Security Hub
+      #   if: always()
+      #   run: |
+      #     if [ -f "report.asff" ]; then
+      #       aws securityhub batch-import-findings --findings "file://report.asff"
+      #     fi
+      #
+      # - name: Import IaC findings to Security Hub
+      #   if: always()
+      #   run: |
+      #     if [ -f "iac-report.asff" ]; then
+      #       aws securityhub batch-import-findings --findings "file://iac-report.asff"
+      #     fi
 
       # Deploy if all checks pass
       - name: Deploy to ECS
