@@ -20,6 +20,23 @@ validate_json() {
     fi
 }
 
+send_to_security_hub() {
+    local file=$1
+    local temp_file="temp_findings.json"
+
+    # Format the JSON and ensure it's in the correct format
+    jq -c '.' "$file" > "$temp_file"
+
+    debug_log "Attempting to send findings..."
+    debug_log "Content of findings file:"
+    cat "$temp_file"
+
+    # Try sending with proper quoting
+    aws securityhub batch-import-findings --findings="$(cat $temp_file)"
+
+    rm -f "$temp_file"
+}
+
 process_findings() {
     local input_file=$1
     local output_file=$2
@@ -35,8 +52,6 @@ process_findings() {
 
         if [ -n "$template" ]; then
             debug_log "Converting using template: $template"
-            debug_log "Template content:"
-            cat "$template"
 
             # Convert to ASFF format using template
             jq -c -f "$template" \
@@ -51,11 +66,7 @@ process_findings() {
         fi
 
         debug_log "Importing findings to Security Hub..."
-        debug_log "Content being sent:"
-        cat "$output_file"
-
-        # Ensure JSON is properly formatted and compact
-        jq -c '.' "$output_file" | aws securityhub batch-import-findings --findings file:///dev/stdin
+        send_to_security_hub "$output_file"
     else
         echo "No $finding_type findings file found at $input_file"
     fi
@@ -70,7 +81,7 @@ ls -la
 if [ -f "report.asff" ]; then
     debug_log "Processing vulnerability report..."
     if validate_json "report.asff"; then
-        jq -c '.' report.asff | aws securityhub batch-import-findings --findings file:///dev/stdin
+        send_to_security_hub "report.asff"
     else
         echo "ERROR: Invalid JSON in report.asff"
         exit 1
