@@ -52,22 +52,40 @@ jobs:
           output: 'report.asff'
           severity: 'CRITICAL,HIGH'
           scanners: 'vuln'  # Disable secret scanning for speed
+        env:
+          AWS_REGION: us-east-1
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+
+
       # Process and validate vulnerability findings
       - name: Process vulnerability findings
         if: always()
         run: |
           if [ -f "report.asff" ]; then
-            # Format JSON and validate
-            cat report.asff | jq '.' > report.formatted.asff
+            echo "Original file content:"
+            cat report.asff
+
+            echo -e "\nFormatting JSON..."
+            jq '.' report.asff > report.formatted.asff
+
+            echo -e "\nFormatted JSON content:"
+            cat report.formatted.asff
+
+            # Validate JSON
             if jq empty report.formatted.asff 2>/dev/null; then
-              # Replace empty strings for required fields
-              jq '.Findings[] |= (
+              echo -e "\nJSON is valid. Adding required fields..."
+
+              # Replace empty fields and create compact JSON
+              jq -c '.Findings[] |= (
                 if .AwsAccountId == "" then .AwsAccountId = env.AWS_ACCOUNT_ID else . end |
                 if .Region == "" then .Region = env.AWS_REGION else . end
               )' report.formatted.asff > report.final.asff
 
-              echo "Findings file validated and processed"
-              aws securityhub batch-import-findings --findings file://report.final.asff
+              echo -e "\nFinal JSON content:"
+              cat report.final.asff
+
+              echo -e "\nImporting to Security Hub..."
+              cat report.final.asff | jq -c '.' | aws securityhub batch-import-findings --findings file:///dev/stdin
             else
               echo "Invalid JSON in report.asff"
               exit 1
