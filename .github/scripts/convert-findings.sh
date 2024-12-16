@@ -24,31 +24,41 @@ send_to_security_hub() {
     local file=$1
     local temp_file="temp_findings.json"
 
-    # Create a properly formatted findings array
-    echo '{"Findings": [' > "$temp_file"
-
-    # Extract and format each finding, joining them with commas
-    jq -c '.Findings[]' "$file" | sed '$!s/$/,/' >> "$temp_file"
-
-    # Close the array
-    echo ']}' >> "$temp_file"
+    # Format the findings using jq to handle escaping and formatting
+    jq -c '{
+        Findings: [.Findings[] | {
+            SchemaVersion,
+            Id,
+            ProductArn,
+            GeneratorId,
+            AwsAccountId,
+            Types,
+            CreatedAt,
+            UpdatedAt,
+            Severity,
+            Title,
+            Description: (.Description | gsub("\n";" ")),
+            Resources: [.Resources[] | {
+                Type,
+                Id,
+                Partition,
+                Region
+            }],
+            RecordState
+        }]
+    }' "$file" > "$temp_file"
 
     debug_log "Attempting to send findings..."
     debug_log "Content of findings file:"
-    cat "$temp_file"
+    jq '.' "$temp_file"  # Pretty print for debug
 
-    # Validate the final JSON
-    if validate_json "$temp_file"; then
-        debug_log "Final JSON is valid"
-        aws securityhub batch-import-findings --findings file://"$temp_file"
-    else
-        debug_log "Final JSON is invalid"
-        return 1
-    fi
+    # Send the findings to Security Hub
+    aws securityhub batch-import-findings --cli-input-json "file://$temp_file"
 
     rm -f "$temp_file"
 }
 
+# Rest of the script remains the same
 process_findings() {
     local input_file=$1
     local output_file=$2
@@ -65,7 +75,6 @@ process_findings() {
         if [ -n "$template" ]; then
             debug_log "Converting using template: $template"
 
-            # Convert to ASFF format using template
             jq -c -f "$template" \
                --arg AWS_REGION "$AWS_REGION" \
                --arg AWS_ACCOUNT_ID "$AWS_ACCOUNT_ID" \
