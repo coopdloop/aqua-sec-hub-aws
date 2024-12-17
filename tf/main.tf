@@ -173,6 +173,10 @@ resource "aws_ecs_service" "main" {
   }
 }
 
+data "aws_iam_openid_connect_provider" "github_actions" {
+  url = "https://token.actions.githubusercontent.com"
+}
+
 # GitHub Actions Role
 resource "aws_iam_role" "github_actions" {
   name = "${var.project_name}-github-actions-role-${var.environment}"
@@ -185,7 +189,7 @@ resource "aws_iam_role" "github_actions" {
       {
         Effect = "Allow"
         Principal = {
-          Federated = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/token.actions.githubusercontent.com"
+          Federated = data.aws_iam_openid_connect_provider.github_actions.arn # Changed to use data source
         }
         Action = "sts:AssumeRoleWithWebIdentity"
         Condition = {
